@@ -163,12 +163,23 @@ async def _check_otp_rate_limit(phone: str):
         )
 
 
-# ---------- Helpers ----------
-PROVIDER_POOL = [
-    {"name": "Ramesh K.", "rating": 4.9, "vehicle": "Scooter · KA-09-AB 4492"},
-    {"name": "Aisha M.",  "rating": 4.8, "vehicle": "Scooter · KA-09-BC 7781"},
-    {"name": "Vikram S.", "rating": 4.9, "vehicle": "Bike · KA-09-CD 1120"},
-    {"name": "Priya N.",  "rating": 5.0, "vehicle": "Scooter · KA-09-DE 9032"},
+# ---------- Provider matching ----------
+SERVICE_RADIUS_KM = 2.5      # ≈ 10 min ride for a city scooter at ~15 km/h
+CITY_AVG_SPEED_KMH = 15.0
+
+# Seed pool — home base coords are scattered around Mysuru (12.2958, 76.6394).
+# When a customer books, we only match a pro whose base is ≤ SERVICE_RADIUS_KM away
+# AND who is currently free (not already on an active booking).
+PROVIDER_SEED = [
+    {"name": "Ramesh K.", "rating": 4.9, "vehicle": "Scooter · KA-09-AB 4492", "base_lat": 12.2974, "base_lng": 76.6420},
+    {"name": "Aisha M.",  "rating": 4.8, "vehicle": "Scooter · KA-09-BC 7781", "base_lat": 12.2942, "base_lng": 76.6361},
+    {"name": "Vikram S.", "rating": 4.9, "vehicle": "Bike · KA-09-CD 1120",    "base_lat": 12.2911, "base_lng": 76.6452},
+    {"name": "Priya N.",  "rating": 5.0, "vehicle": "Scooter · KA-09-DE 9032", "base_lat": 12.3007, "base_lng": 76.6378},
+    {"name": "Suresh B.", "rating": 4.7, "vehicle": "Scooter · KA-09-EF 2210", "base_lat": 12.2880, "base_lng": 76.6402},
+    {"name": "Lata R.",   "rating": 4.9, "vehicle": "Scooter · KA-09-FG 5588", "base_lat": 12.2965, "base_lng": 76.6310},
+    # Out-of-radius pros (deliberately further from city centre — proves matching works)
+    {"name": "Manoj T.",  "rating": 4.8, "vehicle": "Scooter · KA-09-GH 7799", "base_lat": 12.3340, "base_lng": 76.6150},
+    {"name": "Devi S.",   "rating": 4.9, "vehicle": "Scooter · KA-09-HI 4422", "base_lat": 12.2620, "base_lng": 76.6790},
 ]
 
 
@@ -179,6 +190,33 @@ def _haversine_km(a_lat, a_lng, b_lat, b_lng):
     dl = math.radians(b_lng - a_lng)
     x = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return 2 * R * math.asin(math.sqrt(x))
+
+
+async def _seed_providers():
+    if await db.providers.count_documents({}) > 0:
+        return
+    docs = [
+        {**p, "id": str(uuid.uuid4()), "active_booking_id": None, "created_at": datetime.now(timezone.utc).isoformat()}
+        for p in PROVIDER_SEED
+    ]
+    await db.providers.insert_many(docs)
+
+
+async def _find_nearest_provider(cust_lat: float, cust_lng: float, radius_km: float = SERVICE_RADIUS_KM):
+    """Return the closest free provider within radius_km, plus distance. None if none."""
+    candidates = await db.providers.find(
+        {"active_booking_id": None}, {"_id": 0}
+    ).to_list(200)
+    in_range = []
+    for p in candidates:
+        d = _haversine_km(p["base_lat"], p["base_lng"], cust_lat, cust_lng)
+        if d <= radius_km:
+            in_range.append((d, p))
+    if not in_range:
+        return None, None
+    in_range.sort(key=lambda t: t[0])
+    distance, provider = in_range[0]
+    return provider, distance
 
 
 def _normalize_phone(raw: str) -> str:
@@ -313,6 +351,32 @@ async def list_services():
     return SERVICES
 
 
+@api_router.get("/availability")
+async def availability(lat: float, lng: float):
+    """Quick lookup for the front-end to show 'pros nearby' before booking."""
+    candidates = await db.providers.find(
+        {"active_booking_id": None}, {"_id": 0, "name": 1, "rating": 1, "base_lat": 1, "base_lng": 1}
+    ).to_list(200)
+    nearby = []
+    for p in candidates:
+        d = _haversine_km(p["base_lat"], p["base_lng"], lat, lng)
+        if d <= SERVICE_RADIUS_KM:
+            nearby.append({
+                "name": p["name"],
+                "rating": p["rating"],
+                "distance_km": round(d, 2),
+                "eta_min": max(1, int(round(d * 60.0 / CITY_AVG_SPEED_KMH))),
+            })
+    nearby.sort(key=lambda x: x["distance_km"])
+    return {
+        "available": bool(nearby),
+        "count": len(nearby),
+        "radius_km": SERVICE_RADIUS_KM,
+        "nearest_eta_min": nearby[0]["eta_min"] if nearby else None,
+        "providers": nearby[:5],
+    }
+
+
 @api_router.post("/bookings", response_model=Booking)
 async def create_booking(payload: BookingCreate, user: dict = Depends(get_current_user)):
     service = SERVICE_BY_ID.get(payload.service_id)
@@ -328,13 +392,21 @@ async def create_booking(payload: BookingCreate, user: dict = Depends(get_curren
     if payload.customer_name and payload.customer_name.strip() and user.get("name") != payload.customer_name.strip():
         await db.users.update_one({"id": user["id"]}, {"$set": {"name": payload.customer_name.strip()}})
 
-    provider = random.choice(PROVIDER_POOL)
-    bearing = random.uniform(0, 2 * math.pi)
-    offset_lat = payload.address.lat + math.cos(bearing) * 0.022
-    offset_lng = payload.address.lng + math.sin(bearing) * 0.022
+    provider, distance_km = await _find_nearest_provider(payload.address.lat, payload.address.lng)
+    if not provider:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Sorry — no pros are within ~10 minutes of this address right now. "
+                "Try a different address or please come back in a bit."
+            ),
+        )
 
+    eta_min = max(1, int(round(distance_km * 60.0 / CITY_AVG_SPEED_KMH)))
+
+    booking_id = str(uuid.uuid4())
     booking = {
-        "id": str(uuid.uuid4()),
+        "id": booking_id,
         "service_id": service["id"],
         "service_name": service["name"],
         "price": service["price"],
@@ -346,17 +418,54 @@ async def create_booking(payload: BookingCreate, user: dict = Depends(get_curren
         "status": "pending",
         "payment": None,
         "provider": {
-            **provider,
-            "lat": offset_lat,
-            "lng": offset_lng,
+            "id": provider["id"],
+            "name": provider["name"],
+            "rating": provider["rating"],
+            "vehicle": provider["vehicle"],
+            "lat": provider["base_lat"],
+            "lng": provider["base_lng"],
             "started_at": datetime.now(timezone.utc).isoformat(),
+            "initial_distance_km": round(distance_km, 2),
+            "initial_eta_min": eta_min,
         },
         "created_at": datetime.now(timezone.utc).isoformat(),
         "user_id": user["id"],
         "history": [],
     }
+    # Reserve the provider so concurrent bookings can't grab them.
+    # Compare-and-set: only succeeds if active_booking_id is still None.
+    reservation = await db.providers.update_one(
+        {"id": provider["id"], "active_booking_id": None},
+        {"$set": {"active_booking_id": booking_id}},
+    )
+    if reservation.modified_count == 0:
+        # Race condition — another request grabbed this pro between query and update. Retry once.
+        provider, distance_km = await _find_nearest_provider(payload.address.lat, payload.address.lng)
+        if not provider:
+            raise HTTPException(status_code=503, detail="No pros available right now — please try again in a moment.")
+        booking["provider"] = {
+            "id": provider["id"], "name": provider["name"], "rating": provider["rating"],
+            "vehicle": provider["vehicle"],
+            "lat": provider["base_lat"], "lng": provider["base_lng"],
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "initial_distance_km": round(distance_km, 2),
+            "initial_eta_min": max(1, int(round(distance_km * 60.0 / CITY_AVG_SPEED_KMH))),
+        }
+        await db.providers.update_one(
+            {"id": provider["id"]}, {"$set": {"active_booking_id": booking_id}}
+        )
+
     await db.bookings.insert_one(booking.copy())
     return Booking(**booking)
+
+
+async def _release_provider(booking_doc: dict):
+    pid = (booking_doc.get("provider") or {}).get("id")
+    if pid:
+        await db.providers.update_one(
+            {"id": pid, "active_booking_id": booking_doc["id"]},
+            {"$set": {"active_booking_id": None}},
+        )
 
 
 @api_router.get("/bookings", response_model=List[Booking])
@@ -401,6 +510,8 @@ async def update_status(booking_id: str, payload: StatusUpdate, user: dict = Dep
         raise HTTPException(status_code=404, detail="Booking not found")
     await db.bookings.update_one({"id": booking_id}, {"$set": {"status": payload.status}})
     doc["status"] = payload.status
+    if payload.status in {"completed", "cancelled"}:
+        await _release_provider(doc)
     return Booking(**doc)
 
 
@@ -448,6 +559,7 @@ async def cancel_booking(booking_id: str, payload: CancelRequest, user: dict = D
     )
     doc.update(update)
     doc.setdefault("history", []).append(history_entry)
+    await _release_provider(doc)
     return Booking(**doc)
 
 
@@ -583,6 +695,8 @@ async def on_startup():
         await db.otps.create_index("expires_at", expireAfterSeconds=OTP_TTL_SECONDS)
     await db.bookings.create_index("user_id")
     await db.bookings.create_index("id", unique=True)
+    await db.providers.create_index("id", unique=True)
+    await _seed_providers()
 
 
 @app.on_event("shutdown")

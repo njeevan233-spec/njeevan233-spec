@@ -1,0 +1,36 @@
+{
+  "summary": "Tested iteration-3: nearby-provider matching (2.5km radius) replacing random provider spawn. Added new pytest suite /app/backend/tests/test_provider_matching.py with 7 tests — all pass. Full regression: 37/37 backend tests pass (iter1 19/19 + iter2 11/11 + iter3 7/7). Frontend availability banner on Home page verified: renders '6 pros nearby · arriving in ~1 min' against Mysuru centre when pool is free; assertion confirmed via Playwright. The 'No pros nearby' branch is covered by backend 503 tests (direct UI toggle needs geolocation override — not tested via FE, but banner template handles both branches in code).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_provider_matching.py",
+    "/app/test_reports/pytest/iter3_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Add a data-testid='availability-banner-count' span for easier exact-value assertions from automation.",
+    "(Optional) After the user grants geolocation, pass real browser coords to checkAvailability so the banner reflects the actual address, not just Mysuru centre.",
+    "(Optional) When availability=false on Home, also disable/visually dim the service cards (currently they still appear clickable and the 503 only surfaces after booking)."
+  ],
+  "critical_code_review_comments": [
+    "Race-condition retry path in create_booking (lines 441-456) does not duplicate the initial CAS; the fallback uses a plain `$set` without the `active_booking_id: None` guard. Under very high concurrency a third-party could grab the retry provider in the microsecond between _find_nearest_provider and update_one. Acceptable given current load, but flag for a second CAS.",
+    "cancel_booking calls _release_provider without checking that the booking status was NOT already 'cancelled'; double-cancel is already blocked by the CANCELLABLE_STATUSES check (returns 400) — safe.",
+    "reschedule_booking does NOT re-match provider when the slot changes; the same provider remains reserved across the reschedule, which is fine semantically but means /availability count won't be restored if the new slot is far out. Current product spec.",
+    "_seed_providers is idempotent (only seeds if collection empty) — good. But if the collection is partially populated (e.g. migration added 2 new names later), this check skips seeding entirely. Consider seeding by unique name upsert.",
+    "availability endpoint iterates all free providers in Python and sorts in-memory; fine for 8 providers, but would need a geospatial index (2dsphere) for any real scale.",
+    "SERVICE_RADIUS_KM (2.5) and CITY_AVG_SPEED_KMH (15) are hard-coded constants. Consider moving to env or per-city config for rollout to new cities.",
+    "tracking endpoint advances the live provider.lat/lng on the booking doc each poll but never syncs that drift back to db.providers.base_lat — so the provider's home base remains correct for matching. Good separation.",
+    "Availability response names field returns ALL nearby pros via 'providers'[:5] but count uses full list length — consistent, good."
+  ],
+  "updated_files": ["/app/backend/tests/test_provider_matching.py (new)"],
+  "success_rate": {"backend": "100% (7/7 new + 30/30 regression = 37/37)", "frontend": "100% (availability-banner verified in 'available' state)"},
+  "test_credentials": "Phone: any random 10-digit (tests use 9xxxxxxxxx). Demo OTP returned in /api/auth/request-otp response.",
+  "seed_data_creation": "Tests use per-run random phone numbers (TEST_* names). Provider collection is reset (active_booking_id=None for all) via a module-scoped autouse fixture at module start AND teardown, so the suite is hermetic and doesn't depend on prior iteration cleanup. After all backend tests run, I manually reset providers again so downstream FE checks and main-agent self-test start clean with count=6.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration-3 suite is /app/backend/tests/test_provider_matching.py (7 tests: availability in/out of range, booking in-range, booking out-of-range 503, provider reserve→release on cancel, out-of-radius pros never assigned, tracking converges). The suite includes a module-scoped autouse fixture that resets db.providers.active_booking_id to None on entry and exit — so you can re-run safely even if older tests left reservations. If you see fewer than 6 pros in /api/availability for Mysuru centre, run: python -c \"import asyncio,os; from motor.motor_asyncio import AsyncIOMotorClient; c=AsyncIOMotorClient(os.environ['MONGO_URL']); asyncio.run(c['\\${DB_NAME}'].providers.update_many({},{'\\$set':{'active_booking_id':None}}))\" (load .env first). Service radius is 2.5km; pool size is 8 (6 in-range, 2 out-of-range named 'Manoj T.' and 'Devi S.'). Home.jsx checks availability against Mysuru centre (DEFAULT_LOC=12.2958,76.6394) — banner data-testid='availability-banner'.",
+  "rca of the issue": "N/A — all requested behaviours pass. Random-provider regression is now fully replaced by a deterministic haversine match + CAS reservation; out-of-radius pros provably never assigned; 503 returned cleanly when pool empty or address outside 2.5km."
+}

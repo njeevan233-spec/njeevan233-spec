@@ -16,6 +16,7 @@ export function setAuthToken(token) {
 
 // Public
 export const listServices = () => api.get("/services").then((r) => r.data);
+export const checkAvailability = (lat, lng) => api.get("/availability", { params: { lat, lng } }).then((r) => r.data);
 
 // Auth
 export const requestOtp = (phone, name) => api.post("/auth/request-otp", { phone, name }).then((r) => r.data);

@@ -1,20 +1,26 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { MagnifyingGlass, ArrowRight, SealCheck, Clock, Lightning, Sparkle } from "@phosphor-icons/react";
+import { MagnifyingGlass, ArrowRight, SealCheck, Clock, Lightning, MapPin } from "@phosphor-icons/react";
 import Header from "@/components/Header";
 import ServiceIcon, { TINT } from "@/components/ServiceIcon";
-import { listServices } from "@/lib/api";
+import { listServices, checkAvailability } from "@/lib/api";
 
 const HERO_BG =
   "https://images.pexels.com/photos/28122113/pexels-photo-28122113.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
 
+const DEFAULT_LOC = { lat: 12.2958, lng: 76.6394 }; // Mysuru centre
+
 export default function Home() {
   const [services, setServices] = useState([]);
   const [q, setQ] = useState("");
+  const [avail, setAvail] = useState(null);
 
   useEffect(() => {
     listServices().then(setServices).catch(() => setServices([]));
+    checkAvailability(DEFAULT_LOC.lat, DEFAULT_LOC.lng)
+      .then(setAvail)
+      .catch(() => setAvail({ available: false, count: 0, nearest_eta_min: null }));
   }, []);
 
   const filtered = services.filter((s) =>
@@ -64,6 +70,22 @@ export default function Home() {
               <span className="inline-flex items-center gap-1.5"><SealCheck size={16} weight="fill" className="text-green-700" /> Background-checked pros</span>
               <span className="inline-flex items-center gap-1.5"><Clock size={16} weight="fill" className="text-amber-600" /> Arrives in 10 minutes</span>
             </div>
+
+            {avail && (
+              <div
+                data-testid="availability-banner"
+                className={`mt-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ${
+                  avail.available
+                    ? "bg-green-50 text-green-800 ring-green-200"
+                    : "bg-amber-50 text-amber-800 ring-amber-200"
+                }`}
+              >
+                <MapPin size={14} weight="fill" />
+                {avail.available
+                  ? `${avail.count} pro${avail.count === 1 ? "" : "s"} nearby · arriving in ~${avail.nearest_eta_min} min`
+                  : "No pros nearby right now — please check back soon"}
+              </div>
+            )}
           </div>
         </section>
 
