@@ -86,6 +86,9 @@ class Booking(BaseModel):
     provider: Optional[dict] = None
     created_at: str
     user_id: Optional[str] = None
+    history: List[dict] = Field(default_factory=list)
+    cancelled_reason: Optional[str] = None
+    cancelled_at: Optional[str] = None
 
 
 class PaymentConfirm(BaseModel):
@@ -95,6 +98,14 @@ class PaymentConfirm(BaseModel):
 
 class StatusUpdate(BaseModel):
     status: str
+
+
+class RescheduleRequest(BaseModel):
+    scheduled_for: str  # ISO datetime in UTC
+
+
+class CancelRequest(BaseModel):
+    reason: Optional[str] = ""
 
 
 class OtpRequest(BaseModel):
@@ -112,6 +123,43 @@ class PublicUser(BaseModel):
     phone: str
     name: Optional[str] = None
     created_at: str
+
+
+# ---------- Rate limiting ----------
+OTP_RATE_LIMIT_MAX = 3        # max OTP requests
+OTP_RATE_LIMIT_WINDOW = 600   # per 10 minutes
+OTP_RATE_LIMIT_COOLDOWN = 30  # min seconds between two requests
+
+
+async def _check_otp_rate_limit(phone: str):
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(seconds=OTP_RATE_LIMIT_WINDOW)
+    recent = await db.otps.find(
+        {"phone": phone, "created_at": {"$gte": window_start}},
+        {"_id": 0, "created_at": 1},
+    ).sort("created_at", -1).to_list(OTP_RATE_LIMIT_MAX + 1)
+
+    if recent:
+        last = recent[0]["created_at"]
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        wait = OTP_RATE_LIMIT_COOLDOWN - int((now - last).total_seconds())
+        if wait > 0:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Please wait {wait}s before requesting another OTP",
+            )
+
+    if len(recent) >= OTP_RATE_LIMIT_MAX:
+        oldest = recent[-1]["created_at"]
+        if oldest.tzinfo is None:
+            oldest = oldest.replace(tzinfo=timezone.utc)
+        retry_in = OTP_RATE_LIMIT_WINDOW - int((now - oldest).total_seconds())
+        retry_in = max(retry_in, 1)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many OTP requests. Try again in {retry_in}s.",
+        )
 
 
 # ---------- Helpers ----------
@@ -173,6 +221,8 @@ async def request_otp(payload: OtpRequest):
     phone = _normalize_phone(payload.phone)
     if len(phone) != 10:
         raise HTTPException(status_code=400, detail="Enter a valid 10-digit Indian mobile number")
+
+    await _check_otp_rate_limit(phone)
 
     otp_code = f"{random.randint(0, 999999):06d}"
     otp_id = str(uuid.uuid4())
@@ -302,6 +352,7 @@ async def create_booking(payload: BookingCreate, user: dict = Depends(get_curren
         },
         "created_at": datetime.now(timezone.utc).isoformat(),
         "user_id": user["id"],
+        "history": [],
     }
     await db.bookings.insert_one(booking.copy())
     return Booking(**booking)
@@ -352,11 +403,120 @@ async def update_status(booking_id: str, payload: StatusUpdate, user: dict = Dep
     return Booking(**doc)
 
 
+def _parse_iso(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        v = value.replace("Z", "+00:00") if value.endswith("Z") else value
+        dt = datetime.fromisoformat(v)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
+CANCELLABLE_STATUSES = {"pending", "paid", "confirmed", "on-the-way"}
+RESCHEDULABLE_STATUSES = {"pending", "paid", "confirmed"}
+RESCHEDULE_LEAD_MIN = 60  # minutes before slot
+
+
+@api_router.post("/bookings/{booking_id}/cancel", response_model=Booking)
+async def cancel_booking(booking_id: str, payload: CancelRequest, user: dict = Depends(get_current_user)):
+    doc = await db.bookings.find_one({"id": booking_id, "user_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if doc["status"] not in CANCELLABLE_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Cannot cancel a booking that is '{doc['status']}'")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    history_entry = {
+        "type": "cancelled",
+        "from_status": doc["status"],
+        "reason": (payload.reason or "").strip()[:240],
+        "at": now_iso,
+    }
+    update = {
+        "status": "cancelled",
+        "cancelled_at": now_iso,
+        "cancelled_reason": history_entry["reason"],
+    }
+    await db.bookings.update_one(
+        {"id": booking_id},
+        {"$set": update, "$push": {"history": history_entry}},
+    )
+    doc.update(update)
+    doc.setdefault("history", []).append(history_entry)
+    return Booking(**doc)
+
+
+@api_router.post("/bookings/{booking_id}/reschedule", response_model=Booking)
+async def reschedule_booking(booking_id: str, payload: RescheduleRequest, user: dict = Depends(get_current_user)):
+    doc = await db.bookings.find_one({"id": booking_id, "user_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if doc["status"] not in RESCHEDULABLE_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Cannot reschedule a booking that is '{doc['status']}'")
+
+    new_time = _parse_iso(payload.scheduled_for)
+    if not new_time:
+        raise HTTPException(status_code=400, detail="Invalid date/time")
+
+    now = datetime.now(timezone.utc)
+    if new_time <= now + timedelta(minutes=RESCHEDULE_LEAD_MIN):
+        raise HTTPException(status_code=400, detail=f"Pick a slot at least {RESCHEDULE_LEAD_MIN} minutes in the future")
+
+    # Existing slot must also still be > 1h away (can't reschedule something starting in <1h)
+    existing = _parse_iso(doc.get("scheduled_for", ""))
+    if existing and existing <= now + timedelta(minutes=RESCHEDULE_LEAD_MIN):
+        raise HTTPException(status_code=400, detail="Too close to the original slot to reschedule")
+
+    new_iso = new_time.astimezone(timezone.utc).isoformat()
+    history_entry = {
+        "type": "rescheduled",
+        "from": doc.get("scheduled_for"),
+        "to": new_iso,
+        "at": now.isoformat(),
+    }
+
+    # If booking was already confirmed (paid), keep it confirmed; otherwise keep pending.
+    new_status = "confirmed" if doc["status"] in {"confirmed", "paid"} else "pending"
+    update = {"scheduled_for": new_iso, "status": new_status}
+    await db.bookings.update_one(
+        {"id": booking_id},
+        {"$set": update, "$push": {"history": history_entry}},
+    )
+    doc.update(update)
+    doc.setdefault("history", []).append(history_entry)
+    return Booking(**doc)
+
+
 @api_router.get("/bookings/{booking_id}/tracking")
 async def tracking(booking_id: str, user: dict = Depends(get_current_user)):
     doc = await db.bookings.find_one({"id": booking_id, "user_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Booking not found")
+
+    if doc["status"] in {"cancelled", "completed"}:
+        # Frozen — return current state without advancing
+        addr = doc["address"]
+        prov = doc.get("provider") or {}
+        p_lat = prov.get("lat", addr["lat"])
+        p_lng = prov.get("lng", addr["lng"])
+        return {
+            "booking_id": booking_id,
+            "status": doc["status"],
+            "customer": {"lat": addr["lat"], "lng": addr["lng"]},
+            "provider": {
+                "name": prov.get("name"),
+                "rating": prov.get("rating"),
+                "vehicle": prov.get("vehicle"),
+                "lat": p_lat,
+                "lng": p_lng,
+            },
+            "distance_km": round(_haversine_km(p_lat, p_lng, addr["lat"], addr["lng"]), 2),
+            "eta_min": 0,
+        }
 
     addr = doc["address"]
     prov = doc.get("provider") or {}

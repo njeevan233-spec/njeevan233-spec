@@ -1,0 +1,40 @@
+{
+  "summary": "Tested iteration-2 features: per-phone OTP rate-limit, cancel & reschedule booking flows. 11/11 new pytest backend tests passed (rate-limit-2/2, cancel-4/4, reschedule-4/4, tracking-frozen-1/1). Frontend Playwright e2e covered: manage-section visibility per status, reschedule dialog defaults (24h ahead, today minDate), reschedule submit, cancel dialog 'Other' reason → custom textarea, red Cancelled banner with reason, tracking distance frozen on cancelled booking. All flows green.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Tracking page", "issues": [
+        "Booking summary shows 'Amount paid: ₹299' even when payment was never made (uses booking.price unconditionally). Should hide or relabel for unpaid/cancelled bookings.",
+        "Stat card 'Status: cancelled' — prettyStatus() has no mapping for 'cancelled', so it renders lowercase. Map it to 'Cancelled' for consistency.",
+        "Status timeline shows no greyed/strike-through state when status='cancelled'. Currently no timeline node lights up; consider showing a 'Cancelled' end-state."
+      ]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_rate_limit_cancel_reschedule.py",
+    "/app/test_reports/pytest/iter2_results.xml"
+  ],
+  "action_items": [
+    "(Optional polish) Fix 'Amount paid' label to reflect actual payment state on Tracking page",
+    "(Optional polish) Add 'cancelled' to prettyStatus() map for proper capitalisation",
+    "(Optional polish) Render terminal 'Cancelled' state on the progress timeline"
+  ],
+  "critical_code_review_comments": [
+    "Rate limit relies solely on db.otps records; if the OTP TTL index later drops rows < 30s old (it won't at 300s), rate-limit window correctness depends on TTL ≥ window. Currently OK (TTL 300s vs cooldown 30s).",
+    "_check_otp_rate_limit raises with the most-recent record before checking total count; if a phone hits MAX in window, it'll get 429 with cooldown msg first, then count-msg only after cooldown. Acceptable.",
+    "reschedule_booking always sets status='confirmed' if previous was paid/confirmed even though no new provider re-assignment is performed in code (provider object kept). Cosmetic only — no bug.",
+    "tracking endpoint advances provider position and may auto-flip status to 'on-the-way' very quickly (distance threshold 5km, start ~2.4km), so reschedule UI disappears within first poll on a paid booking. Matches product spec but means users have a tiny window post-payment to reschedule. Consider deferring auto-advance until N seconds after confirmed.",
+    "Frontend default reschedule slot is 24h after current scheduled_for, not 24h from now. If a user just booked for tomorrow and then reschedules, default jumps to day-after-tomorrow — fine, but min date is set to today (could let user pick a slot < lead-time and rely on backend 400). Already showing client-side error in submit handler. Good.",
+    "Tracking page's 'Amount paid' field is misleading on unpaid bookings; gate on booking.payment != null."
+  ],
+  "updated_files": ["/app/backend/tests/test_rate_limit_cancel_reschedule.py (new)"],
+  "success_rate": {"backend": "100% (11/11 new + 19/19 prev)", "frontend": "100% (manage-section + reschedule + cancel + frozen-tracking flows)"},
+  "test_credentials": "Phone: any random 10-digit (e.g. 9777xxxxxx); OTP visible at data-testid=demo-otp-code on /login.",
+  "seed_data_creation": "Tests create per-run users/bookings with random phones starting 9. Bookings prefixed via TEST_ user names. No teardown (mock data, OTP TTL handles cleanup).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration-2 suite is /app/backend/tests/test_rate_limit_cancel_reschedule.py (pytest, 11 tests). Iteration-1 suite still at /app/backend/tests/test_auth_bookings.py. To FE-test reschedule on a paid booking, you must act within 1 polling cycle (~3s) before tracking auto-advances status to on-the-way, OR test on a pending (unpaid) booking by creating it via API + navigating to /track/:id. Cancel works in any of {pending, paid, confirmed, on-the-way}. CancelDialog.jsx exposes data-testid='cancel-reason-other' (kebab) etc. RescheduleDialog default slot is 24h after the booking's existing scheduled_for, not now+24h.",
+  "rca of the issue": "N/A — all tests green."
+}

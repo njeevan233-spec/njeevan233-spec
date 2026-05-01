@@ -27,3 +27,5 @@ export const listBookings = () => api.get("/bookings").then((r) => r.data);
 export const getBooking = (id) => api.get(`/bookings/${id}`).then((r) => r.data);
 export const confirmPayment = (id, payload) => api.post(`/bookings/${id}/payment`, payload).then((r) => r.data);
 export const getTracking = (id) => api.get(`/bookings/${id}/tracking`).then((r) => r.data);
+export const cancelBooking = (id, reason) => api.post(`/bookings/${id}/cancel`, { reason }).then((r) => r.data);
+export const rescheduleBooking = (id, scheduled_for) => api.post(`/bookings/${id}/reschedule`, { scheduled_for }).then((r) => r.data);
