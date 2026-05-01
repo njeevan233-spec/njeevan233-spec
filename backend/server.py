@@ -6,6 +6,7 @@ import os
 import logging
 import math
 import random
+import secrets
 import jwt as pyjwt
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -224,7 +225,7 @@ async def request_otp(payload: OtpRequest):
 
     await _check_otp_rate_limit(phone)
 
-    otp_code = f"{random.randint(0, 999999):06d}"
+    otp_code = f"{secrets.randbelow(1_000_000):06d}"
     otp_id = str(uuid.uuid4())
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=OTP_TTL_SECONDS)
 

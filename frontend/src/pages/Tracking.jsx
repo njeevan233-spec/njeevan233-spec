@@ -33,7 +33,10 @@ export default function Tracking() {
       try {
         const t = await getTracking(bookingId);
         if (mounted) setTrack(t);
-      } catch { /* noop */ }
+      } catch (e) {
+        // Polling can fail transiently (network blip, status-flip race). Log once at debug; UI keeps last good state.
+        if (process.env.NODE_ENV !== "production") console.warn("tracking poll failed", e);
+      }
     };
     pull();
     timerRef.current = setInterval(pull, 3000);
