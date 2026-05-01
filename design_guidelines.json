@@ -1,0 +1,109 @@
+{
+  "theme": "light",
+  "archetype": "1 - Organic & Earthy",
+  "design_philosophy": "Fusion over Imitation. The app marries the calm, trustworthy aesthetics of an earthy home interior with the high-tech precision of AI-driven logistics. Expect tactile bento grids, off-white warmth, and sudden contrasting dark-mode moments for live tracking.",
+  "typography": {
+    "fonts": {
+      "headings": "Cabinet Grotesk",
+      "body": "Manrope",
+      "mono": "JetBrains Mono"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl tracking-tight leading-none font-bold text-stone-900",
+      "h2": "text-2xl sm:text-3xl tracking-tight leading-tight font-bold text-stone-900",
+      "h3": "text-xl sm:text-2xl tracking-tight font-semibold text-stone-800",
+      "body": "text-base leading-relaxed text-stone-600",
+      "small": "text-sm text-stone-500 font-medium tracking-wide",
+      "overline": "text-xs uppercase tracking-[0.2em] font-bold text-green-800"
+    }
+  },
+  "colors": {
+    "background": {
+      "app": "#FAFAF9", 
+      "surface": "#FFFFFF",
+      "tracking_map": "#0A0A0A" 
+    },
+    "primary": {
+      "base": "#166534", 
+      "hover": "#14532D", 
+      "foreground": "#FFFFFF"
+    },
+    "secondary": {
+      "base": "#C2410C", 
+      "hover": "#9A3412",
+      "foreground": "#FFFFFF"
+    },
+    "text": {
+      "primary": "#1C1917",
+      "secondary": "#57534E",
+      "muted": "#A8A29E"
+    },
+    "borders": {
+      "default": "#E7E5E4",
+      "focus": "#166534"
+    },
+    "map_accents": {
+      "neon_route": "#F59E0B",
+      "glow": "rgba(245, 158, 11, 0.5)"
+    }
+  },
+  "layout_and_spacing": {
+    "philosophy": "Mobile-first priority. Generous spacing to breathe. The bento grid dominates the service catalog to create rhythm.",
+    "grid_bento": "grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6",
+    "container": "w-full max-w-lg mx-auto md:max-w-2xl lg:max-w-5xl px-4 sm:px-6 py-8",
+    "surface_styles": {
+      "header_nav": "sticky top-0 z-50 backdrop-blur-xl bg-white/70 border-b border-stone-200/50",
+      "bottom_nav": "fixed bottom-0 w-full z-50 backdrop-blur-xl bg-white/80 border-t border-stone-200/50",
+      "service_card": "bg-white border border-stone-200 rounded-3xl p-5 hover:-translate-y-1 transition-transform duration-300 shadow-sm hover:shadow-md",
+      "tracking_card": "bg-black border border-stone-800 rounded-3xl p-6 overflow-hidden relative"
+    }
+  },
+  "motion": {
+    "hover": "transition-all duration-300 ease-in-out",
+    "page_transition": "framer-motion opacity and slight y-axis slide (initial { opacity: 0, y: 10 })",
+    "live_route": "Framer motion SVG path tracing (strokeDasharray & strokeDashoffset) with blur-md filter for glow effect"
+  },
+  "components": {
+    "buttons": "rounded-full px-6 py-3 font-semibold transition-all active:scale-95",
+    "inputs": "Shadcn UI Input, heavily customized: rounded-2xl border-stone-200 bg-stone-50/50 focus:ring-2 focus:ring-green-800/20 focus:border-green-800",
+    "badges": "rounded-full px-3 py-1 text-xs font-bold bg-green-100 text-green-800",
+    "map_visualizer": "Use Mapbox GL or custom dark-themed SVG map. Overlay a glowing animated SVG path. Add 'Tracing Beam' border around the map card."
+  },
+  "assets": {
+    "icons_library": "@phosphor-icons/react (Duotone variant for premium earthy feel)",
+    "images": {
+      "hero_background": {
+        "url": "https://images.pexels.com/photos/28122113/pexels-photo-28122113.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Sunlit modern interior, use as faded background for the header or welcome dashboard area.",
+        "usage": "background-image with overlay bg-white/80"
+      },
+      "ai_map_route": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/b2a3e5b4-0093-468c-8536-85164c4bfd96/images/5c00db72498ebe810466b80547af64edb7d4a71b0077ee84ef753fdcf80bc555.png",
+        "description": "Abstract futuristic dark map route with glowing amber neon line.",
+        "usage": "Use as map placeholder or background texture for the live tracking dashboard."
+      },
+      "upi_qr_concept": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/b2a3e5b4-0093-468c-8536-85164c4bfd96/images/b9345a24b5e75ec443630e06f64f274b727a51155aeefa6e78adc689b9a42792.png",
+        "description": "3D clay style illustration of a smartphone with a UPI QR code.",
+        "usage": "Show on the payment confirmation or UPI scanning screen as an illustration element."
+      },
+      "service_icons_3d": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/b2a3e5b4-0093-468c-8536-85164c4bfd96/images/18b4169d9c6f8ae600b30435ea6d62feca6572a6c2317eef1a813467a8dc17b2.png",
+        "description": "Collection of 3D minimalist icons for home services.",
+        "usage": "Use to extract or conceptually represent the premium 3D aesthetic of service icons in the bento grid."
+      }
+    }
+  },
+  "testing": {
+    "rules": "All interactive elements MUST include data-testid. Format: kebab-case, role-based. e.g., data-testid='book-service-kitchen-btn'"
+  },
+  "instructions_to_main_agent": [
+    "Install dependencies: yarn add @phosphor-icons/react framer-motion",
+    "Apply Archetype 1 (Organic & Earthy). Base app background is #FAFAF9. Do not use generic SaaS blues.",
+    "Implement the home dashboard with a 'Bento Grid' displaying 15 services (kitchen, cleaning, laundry, etc.).",
+    "For the Live Tracking Map, build a custom dark UI card (#0A0A0A) that strongly contrasts with the light app theme. Use framer-motion to trace an SVG neon amber path over it to simulate AI live tracking.",
+    "Ensure all routing and UI feels like a seamless hybrid app for mobile users (use a fixed bottom nav).",
+    "Use Shadcn UI for forms, tabs, and modals but strip the generic Vercel look by applying rounded-3xl borders, warm earthy colors, and soft shadows.",
+    "Never use placeholder image URLs like via.placeholder.com. Use the provided asset URLs exactly as listed in the assets section."
+  ]
+}
