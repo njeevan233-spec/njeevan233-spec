@@ -439,21 +439,29 @@ async def create_booking(payload: BookingCreate, user: dict = Depends(get_curren
         {"$set": {"active_booking_id": booking_id}},
     )
     if reservation.modified_count == 0:
-        # Race condition — another request grabbed this pro between query and update. Retry once.
-        provider, distance_km = await _find_nearest_provider(payload.address.lat, payload.address.lng)
+        # Race condition — another request grabbed this pro between query and update. Retry up to 2 times.
+        for _ in range(2):
+            provider, distance_km = await _find_nearest_provider(payload.address.lat, payload.address.lng)
+            if not provider:
+                break
+            retry = await db.providers.update_one(
+                {"id": provider["id"], "active_booking_id": None},
+                {"$set": {"active_booking_id": booking_id}},
+            )
+            if retry.modified_count == 1:
+                booking["provider"] = {
+                    "id": provider["id"], "name": provider["name"], "rating": provider["rating"],
+                    "vehicle": provider["vehicle"],
+                    "lat": provider["base_lat"], "lng": provider["base_lng"],
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "initial_distance_km": round(distance_km, 2),
+                    "initial_eta_min": max(1, int(round(distance_km * 60.0 / CITY_AVG_SPEED_KMH))),
+                }
+                break
+        else:
+            raise HTTPException(status_code=503, detail="No pros available right now — please try again in a moment.")
         if not provider:
             raise HTTPException(status_code=503, detail="No pros available right now — please try again in a moment.")
-        booking["provider"] = {
-            "id": provider["id"], "name": provider["name"], "rating": provider["rating"],
-            "vehicle": provider["vehicle"],
-            "lat": provider["base_lat"], "lng": provider["base_lng"],
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "initial_distance_km": round(distance_km, 2),
-            "initial_eta_min": max(1, int(round(distance_km * 60.0 / CITY_AVG_SPEED_KMH))),
-        }
-        await db.providers.update_one(
-            {"id": provider["id"]}, {"$set": {"active_booking_id": booking_id}}
-        )
 
     await db.bookings.insert_one(booking.copy())
     return Booking(**booking)

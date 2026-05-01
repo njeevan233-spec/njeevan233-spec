@@ -32,6 +32,13 @@ in 2026-01). Then asked for **phone-number login** (gated only on Book / My Book
   `POST /api/bookings/{id}/reschedule` (only `pending|paid|confirmed`, slot must be ≥ 1 hr
   from now, also blocks if existing slot is < 1 hr away). Both append a `history` array on
   the booking doc.
+- **Geo-matched providers (2026-01)** — Replaced random `PROVIDER_POOL` spawn with a
+  real provider collection seeded around Mysuru. Each booking matches the **closest free
+  pro within 2.5 km** (≈10 min at 15 km/h). 503 returned with a friendly message when
+  nobody is in range. CAS reservation prevents the same pro from being double-booked,
+  with retry on race. Provider released on cancel & on `status=completed`.
+  New endpoint `GET /api/availability?lat&lng` powers a "X pros nearby · arriving in ~Y min"
+  banner on the home hero.
 - **Frontend** — Home (hero + bento, "Arrives in 10 minutes"), Booking form (auth-prefilled),
   Payment (UPI QR + UTR, merchant `helpfast@upi`), Tracking (dark AI map card with live SVG
   route + manage actions), Bookings list (now with **inline Cancel + Reschedule** buttons),
