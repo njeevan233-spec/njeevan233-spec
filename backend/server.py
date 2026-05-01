@@ -163,24 +163,50 @@ async def _check_otp_rate_limit(phone: str):
         )
 
 
-# ---------- Provider matching ----------
-SERVICE_RADIUS_KM = 2.5      # ≈ 10 min ride for a city scooter at ~15 km/h
-CITY_AVG_SPEED_KMH = 15.0
+# ---------- Per-city config & provider matching ----------
+# Defaults — used as fallbacks if a booking address doesn't fall inside any known city.
+DEFAULT_RADIUS_KM = 2.5         # ≈ 10 min ride at 15 km/h
+DEFAULT_SPEED_KMH = 15.0
 
-# Seed pool — home base coords are scattered around Mysuru (12.2958, 76.6394).
-# When a customer books, we only match a pro whose base is ≤ SERVICE_RADIUS_KM away
-# AND who is currently free (not already on an active booking).
-PROVIDER_SEED = [
-    {"name": "Ramesh K.", "rating": 4.9, "vehicle": "Scooter · KA-09-AB 4492", "base_lat": 12.2974, "base_lng": 76.6420},
-    {"name": "Aisha M.",  "rating": 4.8, "vehicle": "Scooter · KA-09-BC 7781", "base_lat": 12.2942, "base_lng": 76.6361},
-    {"name": "Vikram S.", "rating": 4.9, "vehicle": "Bike · KA-09-CD 1120",    "base_lat": 12.2911, "base_lng": 76.6452},
-    {"name": "Priya N.",  "rating": 5.0, "vehicle": "Scooter · KA-09-DE 9032", "base_lat": 12.3007, "base_lng": 76.6378},
-    {"name": "Suresh B.", "rating": 4.7, "vehicle": "Scooter · KA-09-EF 2210", "base_lat": 12.2880, "base_lng": 76.6402},
-    {"name": "Lata R.",   "rating": 4.9, "vehicle": "Scooter · KA-09-FG 5588", "base_lat": 12.2965, "base_lng": 76.6310},
-    # Out-of-radius pros (deliberately further from city centre — proves matching works)
-    {"name": "Manoj T.",  "rating": 4.8, "vehicle": "Scooter · KA-09-GH 7799", "base_lat": 12.3340, "base_lng": 76.6150},
-    {"name": "Devi S.",   "rating": 4.9, "vehicle": "Scooter · KA-09-HI 4422", "base_lat": 12.2620, "base_lng": 76.6790},
+# City registry. `service_radius_km` and `avg_speed_kmh` are tunable per city based on
+# real-world traffic. `match_radius_km` is how close a booking has to be to the city
+# centre to count as "in this city". Add a row to onboard a new city.
+CITIES = [
+    {
+        "id": "mysuru",
+        "name": "Mysuru",
+        "lat": 12.2958, "lng": 76.6394,
+        "match_radius_km": 25.0,
+        "service_radius_km": 2.5,
+        "avg_speed_kmh": 15.0,
+    },
+    {
+        "id": "bangalore",
+        "name": "Bengaluru",
+        "lat": 12.9716, "lng": 77.5946,
+        "match_radius_km": 35.0,
+        # Bengaluru traffic is brutal — bigger radius, slower speed, longer ETAs.
+        "service_radius_km": 4.0,
+        "avg_speed_kmh": 12.0,
+    },
+    {
+        "id": "hyderabad",
+        "name": "Hyderabad",
+        "lat": 17.3850, "lng": 78.4867,
+        "match_radius_km": 30.0,
+        "service_radius_km": 3.5,
+        "avg_speed_kmh": 14.0,
+    },
+    {
+        "id": "chennai",
+        "name": "Chennai",
+        "lat": 13.0827, "lng": 80.2707,
+        "match_radius_km": 30.0,
+        "service_radius_km": 3.5,
+        "avg_speed_kmh": 13.0,
+    },
 ]
+CITY_BY_ID = {c["id"]: c for c in CITIES}
 
 
 def _haversine_km(a_lat, a_lng, b_lat, b_lng):
@@ -192,31 +218,101 @@ def _haversine_km(a_lat, a_lng, b_lat, b_lng):
     return 2 * R * math.asin(math.sqrt(x))
 
 
+def _resolve_city(lat: float, lng: float) -> Optional[dict]:
+    """Return the city the given coordinate falls inside, or None."""
+    best, best_d = None, 1e9
+    for c in CITIES:
+        d = _haversine_km(lat, lng, c["lat"], c["lng"])
+        if d <= c["match_radius_km"] and d < best_d:
+            best, best_d = c, d
+    return best
+
+
+def _city_settings(lat: float, lng: float):
+    """Return (service_radius_km, avg_speed_kmh, city) for a coordinate."""
+    city = _resolve_city(lat, lng)
+    if city:
+        return city["service_radius_km"], city["avg_speed_kmh"], city
+    return DEFAULT_RADIUS_KM, DEFAULT_SPEED_KMH, None
+
+
+# Provider seed across all configured cities. `location` is GeoJSON for the 2dsphere index.
+def _seed_doc(name, rating, vehicle, lat, lng, city_id):
+    return {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "rating": rating,
+        "vehicle": vehicle,
+        "base_lat": lat,
+        "base_lng": lng,
+        "location": {"type": "Point", "coordinates": [lng, lat]},
+        "city_id": city_id,
+        "active_booking_id": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+PROVIDER_SEED = [
+    # ---- Mysuru (radius 2.5 km) ----
+    _seed_doc("Ramesh K.", 4.9, "Scooter · KA-09-AB 4492", 12.2974, 76.6420, "mysuru"),
+    _seed_doc("Aisha M.",  4.8, "Scooter · KA-09-BC 7781", 12.2942, 76.6361, "mysuru"),
+    _seed_doc("Vikram S.", 4.9, "Bike · KA-09-CD 1120",    12.2911, 76.6452, "mysuru"),
+    _seed_doc("Priya N.",  5.0, "Scooter · KA-09-DE 9032", 12.3007, 76.6378, "mysuru"),
+    _seed_doc("Suresh B.", 4.7, "Scooter · KA-09-EF 2210", 12.2880, 76.6402, "mysuru"),
+    _seed_doc("Lata R.",   4.9, "Scooter · KA-09-FG 5588", 12.2965, 76.6310, "mysuru"),
+    # Out-of-radius Mysuru pros (proves the matching works)
+    _seed_doc("Manoj T.",  4.8, "Scooter · KA-09-GH 7799", 12.3340, 76.6150, "mysuru"),
+    _seed_doc("Devi S.",   4.9, "Scooter · KA-09-HI 4422", 12.2620, 76.6790, "mysuru"),
+
+    # ---- Bengaluru (radius 4 km) ----
+    _seed_doc("Anil P.",   4.9, "Scooter · KA-01-XY 3344", 12.9719, 77.5950, "bangalore"),
+    _seed_doc("Kavya H.",  4.8, "Scooter · KA-01-YZ 5566", 12.9759, 77.5917, "bangalore"),
+    _seed_doc("Rohit J.",  4.7, "Bike · KA-05-AB 1188",    12.9698, 77.5980, "bangalore"),
+    _seed_doc("Meera D.",  5.0, "Scooter · KA-01-CD 2200", 12.9670, 77.5905, "bangalore"),
+
+    # ---- Hyderabad (radius 3.5 km) ----
+    _seed_doc("Sanjay R.", 4.9, "Scooter · TS-09-AA 4477", 17.3855, 78.4870, "hyderabad"),
+    _seed_doc("Fatima B.", 4.8, "Scooter · TS-09-AB 5588", 17.3870, 78.4850, "hyderabad"),
+    _seed_doc("Karthik V.",4.9, "Bike · TS-10-XY 6699",    17.3835, 78.4895, "hyderabad"),
+
+    # ---- Chennai (radius 3.5 km) ----
+    _seed_doc("Lakshmi G.",4.9, "Scooter · TN-04-PA 1100", 13.0830, 80.2710, "chennai"),
+    _seed_doc("Vivek I.",  4.7, "Scooter · TN-04-PB 2211", 13.0850, 80.2690, "chennai"),
+    _seed_doc("Divya M.",  5.0, "Scooter · TN-04-PC 3322", 13.0810, 80.2730, "chennai"),
+]
+
+
 async def _seed_providers():
     if await db.providers.count_documents({}) > 0:
         return
-    docs = [
-        {**p, "id": str(uuid.uuid4()), "active_booking_id": None, "created_at": datetime.now(timezone.utc).isoformat()}
-        for p in PROVIDER_SEED
+    await db.providers.insert_many([dict(p) for p in PROVIDER_SEED])
+
+
+async def _find_nearest_provider(cust_lat: float, cust_lng: float, radius_km: Optional[float] = None):
+    """Use a 2dsphere $geoNear aggregation so this scales to tens-of-thousands of providers.
+    Returns (provider, distance_km) for the closest free pro within radius_km, or (None, None)."""
+    if radius_km is None:
+        radius_km, _, _ = _city_settings(cust_lat, cust_lng)
+    pipeline = [
+        {
+            "$geoNear": {
+                "near": {"type": "Point", "coordinates": [cust_lng, cust_lat]},
+                "distanceField": "distance_m",
+                "maxDistance": radius_km * 1000,
+                "spherical": True,
+                "query": {"active_booking_id": None},
+            }
+        },
+        {"$limit": 1},
+        {"$project": {"_id": 0}},
     ]
-    await db.providers.insert_many(docs)
-
-
-async def _find_nearest_provider(cust_lat: float, cust_lng: float, radius_km: float = SERVICE_RADIUS_KM):
-    """Return the closest free provider within radius_km, plus distance. None if none."""
-    candidates = await db.providers.find(
-        {"active_booking_id": None}, {"_id": 0}
-    ).to_list(200)
-    in_range = []
-    for p in candidates:
-        d = _haversine_km(p["base_lat"], p["base_lng"], cust_lat, cust_lng)
-        if d <= radius_km:
-            in_range.append((d, p))
-    if not in_range:
+    cursor = db.providers.aggregate(pipeline)
+    docs = await cursor.to_list(1)
+    if not docs:
         return None, None
-    in_range.sort(key=lambda t: t[0])
-    distance, provider = in_range[0]
-    return provider, distance
+    p = docs[0]
+    distance_km = p.pop("distance_m", 0.0) / 1000.0
+    return p, distance_km
 
 
 def _normalize_phone(raw: str) -> str:
@@ -351,27 +447,53 @@ async def list_services():
     return SERVICES
 
 
+@api_router.get("/cities")
+async def list_cities():
+    """Public registry — useful for front-end city pickers, debugging, and onboarding."""
+    return [{
+        "id": c["id"],
+        "name": c["name"],
+        "lat": c["lat"],
+        "lng": c["lng"],
+        "service_radius_km": c["service_radius_km"],
+        "avg_speed_kmh": c["avg_speed_kmh"],
+    } for c in CITIES]
+
+
 @api_router.get("/availability")
 async def availability(lat: float, lng: float):
-    """Quick lookup for the front-end to show 'pros nearby' before booking."""
-    candidates = await db.providers.find(
-        {"active_booking_id": None}, {"_id": 0, "name": 1, "rating": 1, "base_lat": 1, "base_lng": 1}
-    ).to_list(200)
-    nearby = []
-    for p in candidates:
-        d = _haversine_km(p["base_lat"], p["base_lng"], lat, lng)
-        if d <= SERVICE_RADIUS_KM:
-            nearby.append({
-                "name": p["name"],
-                "rating": p["rating"],
-                "distance_km": round(d, 2),
-                "eta_min": max(1, int(round(d * 60.0 / CITY_AVG_SPEED_KMH))),
-            })
-    nearby.sort(key=lambda x: x["distance_km"])
+    """Quick lookup for the front-end to show 'pros nearby' before booking.
+    Uses the booking address's city config for radius / speed; falls back to defaults."""
+    radius_km, speed_kmh, city = _city_settings(lat, lng)
+
+    pipeline = [
+        {
+            "$geoNear": {
+                "near": {"type": "Point", "coordinates": [lng, lat]},
+                "distanceField": "distance_m",
+                "maxDistance": radius_km * 1000,
+                "spherical": True,
+                "query": {"active_booking_id": None},
+            }
+        },
+        {"$limit": 50},
+        {"$project": {"_id": 0, "name": 1, "rating": 1, "distance_m": 1}},
+    ]
+    docs = await db.providers.aggregate(pipeline).to_list(50)
+    nearby = [
+        {
+            "name": d["name"],
+            "rating": d["rating"],
+            "distance_km": round(d["distance_m"] / 1000.0, 2),
+            "eta_min": max(1, int(round((d["distance_m"] / 1000.0) * 60.0 / speed_kmh))),
+        }
+        for d in docs
+    ]
     return {
         "available": bool(nearby),
         "count": len(nearby),
-        "radius_km": SERVICE_RADIUS_KM,
+        "radius_km": radius_km,
+        "city": {"id": city["id"], "name": city["name"]} if city else None,
         "nearest_eta_min": nearby[0]["eta_min"] if nearby else None,
         "providers": nearby[:5],
     }
@@ -394,15 +516,21 @@ async def create_booking(payload: BookingCreate, user: dict = Depends(get_curren
 
     provider, distance_km = await _find_nearest_provider(payload.address.lat, payload.address.lng)
     if not provider:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Sorry — no pros are within ~10 minutes of this address right now. "
-                "Try a different address or please come back in a bit."
-            ),
-        )
+        _radius, _speed, city = _city_settings(payload.address.lat, payload.address.lng)
+        if city:
+            detail = (
+                f"Sorry — no pros are free within {city['service_radius_km']} km of this {city['name']} address "
+                f"right now. Try a different address or come back in a bit."
+            )
+        else:
+            detail = (
+                "We don't operate at this location yet. Pick an address in Mysuru, Bengaluru, "
+                "Hyderabad, or Chennai for now."
+            )
+        raise HTTPException(status_code=503, detail=detail)
 
-    eta_min = max(1, int(round(distance_km * 60.0 / CITY_AVG_SPEED_KMH)))
+    _radius, speed_kmh, _city = _city_settings(payload.address.lat, payload.address.lng)
+    eta_min = max(1, int(round(distance_km * 60.0 / speed_kmh)))
 
     booking_id = str(uuid.uuid4())
     booking = {
@@ -455,7 +583,7 @@ async def create_booking(payload: BookingCreate, user: dict = Depends(get_curren
                     "lat": provider["base_lat"], "lng": provider["base_lng"],
                     "started_at": datetime.now(timezone.utc).isoformat(),
                     "initial_distance_km": round(distance_km, 2),
-                    "initial_eta_min": max(1, int(round(distance_km * 60.0 / CITY_AVG_SPEED_KMH))),
+                    "initial_eta_min": max(1, int(round(distance_km * 60.0 / speed_kmh))),
                 }
                 break
         else:
@@ -704,6 +832,20 @@ async def on_startup():
     await db.bookings.create_index("user_id")
     await db.bookings.create_index("id", unique=True)
     await db.providers.create_index("id", unique=True)
+
+    # Backfill GeoJSON `location` on any provider docs that pre-date the geo migration.
+    legacy = await db.providers.find(
+        {"location": {"$exists": False}, "base_lat": {"$exists": True}}, {"_id": 0, "id": 1, "base_lat": 1, "base_lng": 1}
+    ).to_list(1000)
+    for p in legacy:
+        await db.providers.update_one(
+            {"id": p["id"]},
+            {"$set": {"location": {"type": "Point", "coordinates": [p["base_lng"], p["base_lat"]]}}},
+        )
+
+    # 2dsphere index for $geoNear matching — scales to 10k+ providers.
+    await db.providers.create_index([("location", "2dsphere")])
+
     await _seed_providers()
 
 
