@@ -121,20 +121,31 @@ export default function Tracking() {
               <div className="text-[10px] uppercase tracking-[0.22em] font-bold text-stone-500 mb-4">Progress</div>
               <ol className="space-y-4">
                 {STATUSES.map((s, i) => {
-                  const done = i <= activeIdx;
-                  const current = i === activeIdx;
+                  const done = !isCancelled && i <= activeIdx;
+                  const current = !isCancelled && i === activeIdx;
                   return (
                     <li key={s.key} className="flex items-center gap-3">
-                      <div className={`h-8 w-8 rounded-full grid place-items-center ring-1 ${done ? "bg-green-800 text-white ring-green-800" : "bg-stone-100 text-stone-400 ring-stone-200"}`}>
+                      <div className={`h-8 w-8 rounded-full grid place-items-center ring-1 ${done ? "bg-green-800 text-white ring-green-800" : "bg-stone-100 text-stone-400 ring-stone-200"} ${isCancelled ? "opacity-40" : ""}`}>
                         {done ? <CheckCircle size={16} weight="fill" /> : <span className="text-xs font-bold">{i + 1}</span>}
                       </div>
                       <div className="flex-1">
-                        <div className={`text-sm font-semibold ${done ? "text-stone-900" : "text-stone-500"}`}>{s.label}</div>
+                        <div className={`text-sm font-semibold ${done ? "text-stone-900" : "text-stone-500"} ${isCancelled ? "line-through opacity-60" : ""}`}>{s.label}</div>
                         {current && <div className="text-[11px] text-green-800 font-semibold">In progress…</div>}
                       </div>
                     </li>
                   );
                 })}
+                {isCancelled && (
+                  <li className="flex items-center gap-3" data-testid="timeline-cancelled-node">
+                    <div className="h-8 w-8 rounded-full grid place-items-center ring-1 bg-red-700 text-white ring-red-700">
+                      <X size={16} weight="bold" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-red-700">Cancelled</div>
+                      <div className="text-[11px] text-red-600 font-medium">Booking ended here</div>
+                    </div>
+                  </li>
+                )}
               </ol>
             </section>
 
@@ -144,7 +155,7 @@ export default function Tracking() {
               <div className="mt-1 font-display text-xl font-bold text-stone-900">{booking.service_name}</div>
               <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
                 <Info label="Scheduled" value={fmtDate(booking.scheduled_for)} />
-                <Info label="Amount paid" value={`₹${booking.price}`} />
+                <Info label={booking.payment ? "Amount paid" : "Amount"} value={`₹${booking.price}`} />
                 <Info label="Address" value={`${booking.address.line1}${booking.address.area ? ", " + booking.address.area : ""}`} span />
               </div>
             </section>
@@ -301,7 +312,7 @@ function progressFromDistance(km) {
 }
 
 function prettyStatus(s) {
-  return { pending: "Pending", paid: "Paid", confirmed: "Confirmed", "on-the-way": "En route", arrived: "Arrived", completed: "Completed" }[s] || s;
+  return { pending: "Pending", paid: "Paid", confirmed: "Confirmed", "on-the-way": "En route", arrived: "Arrived", completed: "Completed", cancelled: "Cancelled" }[s] || s;
 }
 
 function initials(name = "") {
