@@ -16,7 +16,7 @@ export default function Header({ subtitle }) {
             <Sparkle size={20} weight="fill" className="text-amber-300" />
           </div>
           <div className="leading-tight">
-            <div className="font-display text-lg font-bold text-stone-900">HomeGlow</div>
+            <div className="font-display text-lg font-bold text-stone-900">HelpFast</div>
             <div className="text-[10px] uppercase tracking-[0.22em] text-green-800 font-bold">
               {subtitle || "Home Services"}
             </div>

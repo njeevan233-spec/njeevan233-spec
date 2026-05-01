@@ -30,7 +30,7 @@ export default function Profile() {
                 {user ? "Member" : "Guest"}
               </div>
               <div className="font-display text-2xl font-bold truncate" data-testid="profile-name">
-                {user ? (user.name || "HomeGlow Member") : "Not signed in"}
+                {user ? (user.name || "HelpFast Member") : "Not signed in"}
               </div>
               <div className="text-xs text-stone-400 mt-1" data-testid="profile-meta">
                 {user ? <>+91 {user.phone} · {count} booking{count === 1 ? "" : "s"}</> : "Sign in to book and track services"}

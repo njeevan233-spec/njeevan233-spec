@@ -53,7 +53,7 @@ export default function Login() {
       setStep("otp");
       setResendIn(30);
     } catch (ex) {
-      setErr(formatErr(ex));
+      handleRequestErr(ex);
     } finally {
       setLoading(false);
     }
@@ -90,10 +90,21 @@ export default function Login() {
       setOtp("");
       setResendIn(30);
     } catch (ex) {
-      setErr(formatErr(ex));
+      handleRequestErr(ex);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRequestErr = (ex) => {
+    const status = ex?.response?.status;
+    const msg = formatErr(ex);
+    if (status === 429) {
+      const m = msg.match(/(\d+)\s*s/i);
+      const wait = m ? parseInt(m[1], 10) : 30;
+      setResendIn(wait);
+    }
+    setErr(msg);
   };
 
   return (
@@ -145,12 +156,19 @@ export default function Login() {
 
                 {err && <div data-testid="login-error" className="text-sm text-red-700 bg-red-50 rounded-2xl px-4 py-3">{err}</div>}
 
+                {resendIn > 0 && (
+                  <div data-testid="rate-limit-countdown" className="text-xs text-amber-800 bg-amber-50 ring-1 ring-amber-200 rounded-2xl px-4 py-3 inline-flex items-center justify-between w-full">
+                    <span>Wait a moment before requesting another OTP</span>
+                    <span className="font-mono font-bold tabular-nums">{resendIn}s</span>
+                  </div>
+                )}
+
                 <button
-                  disabled={loading}
+                  disabled={loading || resendIn > 0}
                   data-testid="send-otp-btn"
-                  className="w-full rounded-full bg-green-800 hover:bg-green-900 text-white font-semibold py-4 px-6 transition-all active:scale-[0.98] inline-flex items-center justify-center gap-2 disabled:opacity-60"
+                  className="w-full rounded-full bg-green-800 hover:bg-green-900 text-white font-semibold py-4 px-6 transition-all active:scale-[0.98] inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {loading ? "Sending…" : <>Send OTP <ArrowRight size={16} weight="bold" /></>}
+                  {loading ? "Sending…" : resendIn > 0 ? `Try again in ${resendIn}s` : <>Send OTP <ArrowRight size={16} weight="bold" /></>}
                 </button>
 
                 <p className="text-[11px] text-stone-400 text-center inline-flex items-center justify-center gap-1.5 w-full">

@@ -62,7 +62,7 @@ export default function Home() {
 
             <div className="mt-6 flex flex-wrap gap-4 text-xs text-stone-500 font-medium">
               <span className="inline-flex items-center gap-1.5"><SealCheck size={16} weight="fill" className="text-green-700" /> Background-checked pros</span>
-              <span className="inline-flex items-center gap-1.5"><Clock size={16} weight="fill" className="text-amber-600" /> Arrives in 45 mins</span>
+              <span className="inline-flex items-center gap-1.5"><Clock size={16} weight="fill" className="text-amber-600" /> Arrives in 10 minutes</span>
             </div>
           </div>
         </section>
@@ -119,7 +119,7 @@ export default function Home() {
         {/* Promise */}
         <section className="mt-12 rounded-3xl bg-stone-900 text-stone-100 p-8 relative overflow-hidden">
           <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-amber-400/20 blur-3xl" />
-          <div className="text-[10px] uppercase tracking-[0.22em] font-bold text-amber-400">The HomeGlow Promise</div>
+          <div className="text-[10px] uppercase tracking-[0.22em] font-bold text-amber-400">The HelpFast Promise</div>
           <h3 className="font-display text-2xl sm:text-3xl font-bold mt-2 max-w-md">
             Transparent pricing. Live tracking. No surprises.
           </h3>

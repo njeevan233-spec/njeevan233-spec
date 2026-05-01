@@ -5,8 +5,8 @@ import { ArrowLeft, QrCode, SealCheck, CopySimple, CheckCircle } from "@phosphor
 import Header from "@/components/Header";
 import { getBooking, confirmPayment } from "@/lib/api";
 
-const MERCHANT_UPI = "homeglow@upi";
-const MERCHANT_NAME = "HomeGlow Services";
+const MERCHANT_UPI = "helpfast@upi";
+const MERCHANT_NAME = "HelpFast Services";
 
 export default function Payment() {
   const { bookingId } = useParams();
@@ -22,7 +22,7 @@ export default function Payment() {
   }, [bookingId]);
 
   const amount = booking?.price || 0;
-  const upiLink = `upi://pay?pa=${encodeURIComponent(MERCHANT_UPI)}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent("HomeGlow Booking " + bookingId.slice(0, 8))}`;
+  const upiLink = `upi://pay?pa=${encodeURIComponent(MERCHANT_UPI)}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent("HelpFast Booking " + bookingId.slice(0, 8))}`;
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(upiLink)}&size=320x320&margin=8&bgcolor=FAFAF9`;
 
   const copy = async () => {

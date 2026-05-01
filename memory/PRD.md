@@ -1,9 +1,10 @@
-# HomeGlow — Product Requirements (PRD)
+# HelpFast — Product Requirements (PRD)
 
 ## Original Problem Statement
 User shared a basic Node.js + Express + Socket.io service booking app and asked to expand it
-into a full-featured home-services booking app. Then asked for **phone-number login**
-(gated only on Book / My Bookings).
+into a full-featured home-services booking app (originally branded HomeGlow, **renamed to HelpFast**
+in 2026-01). Then asked for **phone-number login** (gated only on Book / My Bookings),
+**cancel + reschedule flows**, and **per-phone OTP rate limiting**.
 
 ## Stack
 - Backend: FastAPI + MongoDB (motor) + PyJWT
@@ -31,9 +32,11 @@ into a full-featured home-services booking app. Then asked for **phone-number lo
   `POST /api/bookings/{id}/reschedule` (only `pending|paid|confirmed`, slot must be ≥ 1 hr
   from now, also blocks if existing slot is < 1 hr away). Both append a `history` array on
   the booking doc.
-- **Frontend** — Home (hero + bento), Booking form (auth-prefilled), Payment (UPI QR + UTR),
-  Tracking (dark AI map card with live SVG route + manage actions), Bookings list,
-  Profile (sign in/out), Login (phone → OTP, demo code shown + auto-fill).
+- **Frontend** — Home (hero + bento, "Arrives in 10 minutes"), Booking form (auth-prefilled),
+  Payment (UPI QR + UTR, merchant `helpfast@upi`), Tracking (dark AI map card with live SVG
+  route + manage actions), Bookings list (now with **inline Cancel + Reschedule** buttons),
+  Profile (sign in/out), Login (phone → OTP, demo code shown + auto-fill, **30-second
+  countdown shown when 429 is hit**).
 - Route guard `RequireAuth` redirects to `/login?next=...` for `/book/:id`, `/bookings`,
   `/track/:id`, `/track`. Home & Profile are public.
 - Tracking page exposes **Reschedule** & **Cancel booking** dialogs; cancelled bookings

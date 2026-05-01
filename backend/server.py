@@ -26,7 +26,7 @@ JWT_ALG = "HS256"
 JWT_TTL_DAYS = 7
 OTP_TTL_SECONDS = 300
 
-app = FastAPI(title="HomeGlow Services API")
+app = FastAPI(title="HelpFast Services API")
 api_router = APIRouter(prefix="/api")
 auth_router = APIRouter(prefix="/api/auth")
 
@@ -304,7 +304,7 @@ async def me(user: dict = Depends(get_current_user)):
 # ---------- Service & Booking Routes ----------
 @api_router.get("/")
 async def root():
-    return {"message": "HomeGlow API running"}
+    return {"message": "HelpFast API running"}
 
 
 @api_router.get("/services")
