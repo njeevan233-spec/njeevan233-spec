@@ -414,7 +414,12 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def on_startup():
     await db.users.create_index("phone", unique=True)
-    await db.otps.create_index("expires_at", expireAfterSeconds=600)
+    # Recreate OTP TTL index if it differs from desired
+    try:
+        await db.otps.create_index("expires_at", expireAfterSeconds=OTP_TTL_SECONDS)
+    except Exception:
+        await db.otps.drop_index("expires_at_1")
+        await db.otps.create_index("expires_at", expireAfterSeconds=OTP_TTL_SECONDS)
     await db.bookings.create_index("user_id")
     await db.bookings.create_index("id", unique=True)
 
